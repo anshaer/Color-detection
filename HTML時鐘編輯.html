@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OBS 時鐘網頁製作器</title>
+<style>
+:root{
+  --panel:#171922;
+  --panel2:#222532;
+  --line:#343847;
+  --text:#f5f7ff;
+  --muted:#aeb4c7;
+  --accent:#8e7dff;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  min-height:100vh;
+  font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif;
+  background:#101117;
+  color:var(--text);
+}
+button,input,select{font:inherit}
+.app{
+  display:grid;
+  grid-template-columns:minmax(320px,440px) 1fr;
+  min-height:100vh;
+}
+.panel{
+  padding:16px;
+  background:var(--panel);
+  border-right:1px solid var(--line);
+  overflow:auto;
+  max-height:100vh;
+}
+h1{font-size:22px;margin:0 0 6px}
+.help{color:var(--muted);font-size:13px;line-height:1.6;margin-bottom:14px}
+.group{
+  background:var(--panel2);
+  border:1px solid var(--line);
+  border-radius:14px;
+  padding:12px;
+  margin-bottom:12px;
+}
+.group h2{font-size:15px;margin:0 0 10px}
+.row{
+  display:grid;
+  grid-template-columns:110px 1fr;
+  gap:9px;
+  align-items:center;
+  margin:8px 0;
+}
+.row label{font-size:13px;color:#dfe2ed}
+input[type="text"],input[type="number"],select,input[type="color"]{
+  width:100%;
+  min-height:36px;
+  border:1px solid #474c5d;
+  border-radius:8px;
+  padding:6px 9px;
+  color:#fff;
+  background:#11131a;
+}
+input[type="color"]{padding:3px}
+.checks{display:flex;flex-wrap:wrap;gap:7px}
+.checks label{
+  display:flex;gap:5px;align-items:center;
+  padding:6px 8px;background:#12141c;border:1px solid #3b4050;border-radius:8px;
+  font-size:13px;
+}
+.buttons{display:flex;flex-wrap:wrap;gap:8px}
+button{
+  border:0;border-radius:9px;padding:9px 12px;cursor:pointer;
+  color:#fff;background:#3b4052;
+}
+button.primary{background:var(--accent)}
+button.danger{background:#9e4152}
+button:hover{filter:brightness(1.12)}
+.stage-wrap{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  background:
+    linear-gradient(45deg,#242630 25%,transparent 25%),
+    linear-gradient(-45deg,#242630 25%,transparent 25%),
+    linear-gradient(45deg,transparent 75%,#242630 75%),
+    linear-gradient(-45deg,transparent 75%,#242630 75%);
+  background-size:24px 24px;
+  background-position:0 0,0 12px,12px -12px,-12px 0;
+}
+.toolbar{
+  height:54px;padding:9px 14px;background:#15171f;border-bottom:1px solid var(--line);
+  display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+}
+.toolbar span{font-size:13px;color:var(--muted)}
+.viewport{
+  flex:1;display:grid;place-items:center;padding:24px;overflow:auto;
+}
+.clock-canvas{
+  width:700px;height:300px;position:relative;overflow:hidden;
+  background:transparent;
+  transform-origin:center;
+  box-shadow:0 0 0 1px rgba(255,255,255,.14);
+}
+.clock-bg,.clock-video{
+  position:absolute;inset:0;width:100%;height:100%;object-fit:contain;pointer-events:none;
+}
+.clock-video{display:none}
+.clock-content{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;
+}
+.clock-stack{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:6px;
+  width:100%;
+}
+.clock-row{
+  display:flex;align-items:baseline;justify-content:center;
+  gap:0;
+  white-space:nowrap;
+}
+.clock-text{
+  color:#ffffff;font-weight:700;font-size:52px;line-height:1.05;
+  text-shadow:0 2px 5px rgba(0,0,0,.5);
+}
+.clock-text.small{font-size:25px}
+.clock-text.ampm{font-size:.45em;margin-left:.22em}
+.separator-line{
+  width:82%;height:0;border-top:3px dashed currentColor;color:#fff;margin:2px auto;
+}
+.block-list{display:flex;flex-direction:column;gap:8px}
+.block{
+  display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;
+  background:#14161e;border:1px solid #3b4050;border-radius:10px;padding:8px;
+}
+.drag{font-size:18px;color:#8f95a7;cursor:grab;text-align:center}
+.block-main{min-width:0}
+.block-name{font-weight:700;font-size:13px}
+.block-sub{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.block-actions{display:flex;gap:4px}
+.block-actions button{padding:5px 7px}
+.media-note{font-size:11px;color:var(--muted);line-height:1.5}
+.hidden{display:none!important}
+@media(max-width:850px){
+  .app{grid-template-columns:1fr}
+  .panel{max-height:none;border-right:0}
+  .stage-wrap{min-height:70vh}
+  .clock-canvas{transform:scale(.75)}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="panel">
+    <h1>OBS 時鐘網頁製作器</h1>
+    <div class="help">
+      採用「列式積木」：每一列可放時間、日期、自訂文字、虛線或「/」。
+      比完全自由拖曳更不容易跑版，也適合手機操作；各列仍可上下移動。
+    </div>
+
+    <section class="group">
+      <h2>畫布與背景</h2>
+      <div class="row"><label>畫布寬度</label><input id="canvasW" type="number" value="700" min="100"></div>
+      <div class="row"><label>畫布高度</label><input id="canvasH" type="number" value="300" min="80"></div>
+      <div class="row"><label>背景模式</label>
+        <select id="bgMode">
+          <option value="transparent">透明</option>
+          <option value="color">純色</option>
+          <option value="image">圖片</option>
+          <option value="video">循環影片</option>
+        </select>
+      </div>
+      <div class="row" id="bgColorRow"><label>背景顏色</label><input id="bgColor" type="color" value="#000000"></div>
+      <div class="row"><label>背景圖片</label><input id="bgImageFile" type="file" accept="image/*"></div>
+      <div class="row"><label>循環影片</label><input id="bgVideoFile" type="file" accept="video/*"></div>
+      <div class="row"><label>媒體填滿</label>
+        <select id="mediaFit">
+          <option value="contain">完整顯示</option>
+          <option value="cover">鋪滿裁切</option>
+          <option value="fill">拉伸填滿</option>
+        </select>
+      </div>
+      <div class="media-note">匯出時會將圖片或影片直接包進 HTML。影片過大會讓 HTML 檔案很大，建議使用短 WebM 或 MP4。</div>
+    </section>
+
+    <section class="group">
+      <h2>整體文字樣式</h2>
+      <div class="row"><label>文字顏色</label><input id="textColor" type="color" value="#ffffff"></div>
+      <div class="row"><label>主字大小</label><input id="mainSize" type="number" value="52" min="8"></div>
+      <div class="row"><label>副字大小</label><input id="smallSize" type="number" value="25" min="8"></div>
+      <div class="row"><label>字體</label>
+        <select id="fontFamily">
+          <option value='"Microsoft JhengHei","Noto Sans TC",sans-serif'>微軟正黑體</option>
+          <option value='"Arial Rounded MT Bold","Microsoft JhengHei",sans-serif'>圓體</option>
+          <option value='Arial,sans-serif'>Arial</option>
+          <option value='"Times New Roman",serif'>Times New Roman</option>
+          <option value='monospace'>等寬字體</option>
+        </select>
+      </div>
+      <div class="row"><label>粗細</label>
+        <select id="fontWeight">
+          <option value="400">一般</option><option value="600">半粗</option><option value="700" selected>粗體</option><option value="900">特粗</option>
+        </select>
+      </div>
+      <div class="row"><label>水平位置</label>
+        <select id="alignX"><option value="flex-start">左</option><option value="center" selected>置中</option><option value="flex-end">右</option></select>
+      </div>
+      <div class="row"><label>垂直位置</label>
+        <select id="alignY"><option value="flex-start">上</option><option value="center" selected>置中</option><option value="flex-end">下</option></select>
+      </div>
+      <div class="row"><label>左右位移</label><input id="offsetX" type="number" value="0"></div>
+      <div class="row"><label>上下位移</label><input id="offsetY" type="number" value="0"></div>
+    </section>
+
+    <section class="group">
+      <h2>新增積木</h2>
+      <div class="buttons">
+        <button data-add="time">＋ 時間</button>
+        <button data-add="date">＋ 日期</button>
+        <button data-add="weekday">＋ 星期</button>
+        <button data-add="dash">＋ 虛線</button>
+        <button data-add="slash">＋ ／</button>
+        <button data-add="text">＋ 自訂文字</button>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>排列順序</h2>
+      <div id="blockList" class="block-list"></div>
+    </section>
+
+    <section class="group hidden" id="editorGroup">
+      <h2>編輯所選積木</h2>
+      <div id="blockEditor"></div>
+    </section>
+
+    <section class="group">
+      <div class="buttons">
+        <button id="presetCute">範例：時間＋日期</button>
+        <button id="presetCompact">範例：單行完整</button>
+        <button id="resetBtn" class="danger">全部重設</button>
+        <button id="exportBtn" class="primary">匯出 OBS 時鐘 HTML</button>
+      </div>
+    </section>
+  </aside>
+
+  <main class="stage-wrap">
+    <div class="toolbar">
+      <button id="zoomOut">－</button>
+      <span id="zoomLabel">100%</span>
+      <button id="zoomIn">＋</button>
+      <span>棋盤格只代表透明，匯出頁面不會顯示棋盤格。</span>
+    </div>
+    <div class="viewport">
+      <div id="clockCanvas" class="clock-canvas">
+        <img id="clockBg" class="clock-bg" alt="">
+        <video id="clockVideo" class="clock-video" autoplay muted loop playsinline></video>
+        <div id="clockContent" class="clock-content"><div id="clockStack" class="clock-stack"></div></div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+let zoom=1;
+let selectedId=null;
+let imageData="";
+let videoData="";
+let blocks=[
+  {id:uid(),type:"time",label:"時間",format:"HH:mm",size:"main"},
+  {id:uid(),type:"dash",label:"虛線",width:58,thickness:3},
+  {id:uid(),type:"date",label:"日期",format:"M.D (ddd)",size:"small"}
+];
+
+function uid(){return "b"+Math.random().toString(36).slice(2,9)}
+function pad(n){return String(n).padStart(2,"0")}
+function weekText(d,mode){
+  const zh=["日","一","二","三","四","五","六"];
+  const en=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  return mode==="zh" ? "星期"+zh[d.getDay()] : en[d.getDay()];
+}
+function formatDate(fmt,d){
+  let h=d.getHours(), h12=h%12||12;
+  const map={
+    YYYY:d.getFullYear(),
+    YY:String(d.getFullYear()).slice(-2),
+    MM:pad(d.getMonth()+1), M:d.getMonth()+1,
+    DD:pad(d.getDate()), D:d.getDate(),
+    HH:pad(h), H:h,
+    hh:pad(h12), h:h12,
+    mm:pad(d.getMinutes()), m:d.getMinutes(),
+    ss:pad(d.getSeconds()), s:d.getSeconds(),
+    A:h<12?"AM":"PM",
+    a:h<12?"am":"pm",
+    ddd:weekText(d,"en"),
+    wk:weekText(d,"zh")
+  };
+  return fmt.replace(/YYYY|YY|MM|DD|HH|hh|ddd|wk|M|D|H|h|mm|m|ss|s|A|a/g,k=>map[k]);
+}
+function renderClock(){
+  const c=$("#clockCanvas");
+  c.style.width=$("#canvasW").value+"px";
+  c.style.height=$("#canvasH").value+"px";
+  c.style.transform=`scale(${zoom})`;
+  const mode=$("#bgMode").value;
+  c.style.background=mode==="color"?$("#bgColor").value:"transparent";
+  $("#clockBg").style.display=mode==="image"&&imageData?"block":"none";
+  $("#clockVideo").style.display=mode==="video"&&videoData?"block":"none";
+  $("#clockBg").style.objectFit=$("#mediaFit").value;
+  $("#clockVideo").style.objectFit=$("#mediaFit").value;
+  const cont=$("#clockContent");
+  cont.style.justifyContent=$("#alignX").value;
+  cont.style.alignItems=$("#alignY").value;
+  cont.style.transform=`translate(${$("#offsetX").value}px,${$("#offsetY").value}px)`;
+  const stack=$("#clockStack");
+  stack.style.fontFamily=$("#fontFamily").value;
+  stack.style.fontWeight=$("#fontWeight").value;
+  stack.innerHTML="";
+  const now=new Date();
+  blocks.forEach(b=>{
+    if(b.type==="dash"){
+      const e=document.createElement("div");
+      e.className="separator-line";
+      e.style.width=(b.width||58)+"%";
+      e.style.borderTopWidth=(b.thickness||3)+"px";
+      e.style.color=$("#textColor").value;
+      stack.appendChild(e);
+      return;
+    }
+    const row=document.createElement("div");
+    row.className="clock-row";
+    let text="";
+    if(["time","date","weekday"].includes(b.type)) text=formatDate(b.format||"HH:mm",now);
+    if(b.type==="slash") text=b.text||"/";
+    if(b.type==="text") text=b.text||"自訂文字";
+    const span=document.createElement("span");
+    span.className="clock-text "+(b.size==="small"?"small":"");
+    span.textContent=text;
+    span.style.color=b.color||$("#textColor").value;
+    span.style.fontSize=(b.customSize|| (b.size==="small"?$("#smallSize").value:$("#mainSize").value))+"px";
+    row.appendChild(span);
+    stack.appendChild(row);
+  });
+}
+function summary(b){
+  if(b.type==="dash") return `寬 ${b.width||58}%／粗 ${b.thickness||3}px`;
+  if(b.type==="text"||b.type==="slash") return b.text||"";
+  return b.format||"";
+}
+function renderList(){
+  const list=$("#blockList"); list.innerHTML="";
+  blocks.forEach((b,i)=>{
+    const e=document.createElement("div");e.className="block";
+    e.draggable=true;e.dataset.id=b.id;
+    e.innerHTML=`<div class="drag">☰</div><div class="block-main"><div class="block-name">${b.label}</div><div class="block-sub">${summary(b)}</div></div>
+    <div class="block-actions"><button data-up="${b.id}">↑</button><button data-down="${b.id}">↓</button><button data-edit="${b.id}">編</button><button data-del="${b.id}">×</button></div>`;
+    list.appendChild(e);
+  });
+}
+function editBlock(id){
+  selectedId=id;
+  const b=blocks.find(x=>x.id===id);
+  if(!b)return;
+  $("#editorGroup").classList.remove("hidden");
+  let html="";
+  if(["time","date","weekday"].includes(b.type)){
+    html+=rowHtml("格式","<input id='edFormat' type='text' value='"+esc(b.format||"")+"'>");
+    html+=`<div class="media-note">可用：YYYY 年、MM 月、DD 日、wk 中文星期、ddd 英文星期、HH 24小時、hh 12小時、mm 分、ss 秒、A AM/PM。</div>`;
+    html+=sizeEditor(b);
+  }else if(b.type==="dash"){
+    html+=rowHtml("虛線寬度",`<input id="edWidth" type="number" min="5" max="100" value="${b.width||58}">`);
+    html+=rowHtml("線條粗細",`<input id="edThick" type="number" min="1" max="20" value="${b.thickness||3}">`);
+  }else{
+    html+=rowHtml("顯示文字",`<input id="edText" type="text" value="${esc(b.text||"")}">`);
+    html+=sizeEditor(b);
+  }
+  html+=`<div class="buttons"><button id="saveBlock" class="primary">套用</button></div>`;
+  $("#blockEditor").innerHTML=html;
+  $("#saveBlock").onclick=saveBlock;
+}
+function sizeEditor(b){
+  return rowHtml("文字層級",`<select id="edSize"><option value="main" ${b.size!=="small"?"selected":""}>主字</option><option value="small" ${b.size==="small"?"selected":""}>副字</option></select>`)
+  +rowHtml("個別字大小",`<input id="edCustomSize" type="number" placeholder="留空使用整體設定" value="${b.customSize||""}">`)
+  +rowHtml("個別顏色",`<input id="edColor" type="color" value="${b.color||$("#textColor").value}">`);
+}
+function rowHtml(label,input){return `<div class="row"><label>${label}</label>${input}</div>`}
+function esc(s){return String(s).replaceAll("&","&amp;").replaceAll('"',"&quot;").replaceAll("<","&lt;")}
+function saveBlock(){
+  const b=blocks.find(x=>x.id===selectedId); if(!b)return;
+  if($("#edFormat"))b.format=$("#edFormat").value;
+  if($("#edText"))b.text=$("#edText").value;
+  if($("#edWidth"))b.width=+$("#edWidth").value;
+  if($("#edThick"))b.thickness=+$("#edThick").value;
+  if($("#edSize"))b.size=$("#edSize").value;
+  if($("#edCustomSize"))b.customSize=$("#edCustomSize").value?+$("#edCustomSize").value:null;
+  if($("#edColor"))b.color=$("#edColor").value;
+  renderList();renderClock();
+}
+function addBlock(type){
+  const defaults={
+    time:{label:"時間",format:"HH:mm:ss",size:"main"},
+    date:{label:"日期",format:"YYYY.MM.DD",size:"small"},
+    weekday:{label:"星期",format:"wk",size:"small"},
+    dash:{label:"虛線",width:58,thickness:3},
+    slash:{label:"斜線",text:"/",size:"small"},
+    text:{label:"自訂文字",text:"自訂文字",size:"small"}
+  };
+  blocks.push({id:uid(),type,...defaults[type]});renderList();renderClock();
+}
+document.addEventListener("click",e=>{
+  const a=e.target.dataset;
+  if(a.add)addBlock(a.add);
+  if(a.edit)editBlock(a.edit);
+  if(a.del){blocks=blocks.filter(x=>x.id!==a.del);renderList();renderClock()}
+  if(a.up||a.down){
+    const id=a.up||a.down, i=blocks.findIndex(x=>x.id===id), j=a.up?i-1:i+1;
+    if(j>=0&&j<blocks.length)[blocks[i],blocks[j]]=[blocks[j],blocks[i]];
+    renderList();renderClock();
+  }
+});
+let dragId=null;
+$("#blockList").addEventListener("dragstart",e=>{dragId=e.target.closest(".block")?.dataset.id});
+$("#blockList").addEventListener("dragover",e=>e.preventDefault());
+$("#blockList").addEventListener("drop",e=>{
+  e.preventDefault();const target=e.target.closest(".block")?.dataset.id;
+  if(!dragId||!target||dragId===target)return;
+  const from=blocks.findIndex(x=>x.id===dragId),to=blocks.findIndex(x=>x.id===target);
+  const [m]=blocks.splice(from,1);blocks.splice(to,0,m);renderList();renderClock();
+});
+document.querySelectorAll("input,select").forEach(e=>e.addEventListener("input",renderClock));
+$("#bgMode").addEventListener("change",renderClock);
+$("#bgImageFile").addEventListener("change",async e=>{
+  const f=e.target.files[0];if(!f)return;
+  imageData=await fileData(f);$("#clockBg").src=imageData;$("#bgMode").value="image";renderClock();
+});
+$("#bgVideoFile").addEventListener("change",async e=>{
+  const f=e.target.files[0];if(!f)return;
+  videoData=await fileData(f);$("#clockVideo").src=videoData;$("#bgMode").value="video";renderClock();
+});
+function fileData(f){return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result);r.onerror=rej;r.readAsDataURL(f)})}
+$("#zoomIn").onclick=()=>{zoom=Math.min(2,zoom+.1);$("#zoomLabel").textContent=Math.round(zoom*100)+"%";renderClock()}
+$("#zoomOut").onclick=()=>{zoom=Math.max(.2,zoom-.1);$("#zoomLabel").textContent=Math.round(zoom*100)+"%";renderClock()}
+$("#presetCute").onclick=()=>{
+ blocks=[
+  {id:uid(),type:"time",label:"時間",format:"HH:mm",size:"main"},
+  {id:uid(),type:"dash",label:"虛線",width:56,thickness:3},
+  {id:uid(),type:"date",label:"日期",format:"M.D (wk)",size:"small"}
+ ];renderList();renderClock();
+}
+$("#presetCompact").onclick=()=>{
+ blocks=[{id:uid(),type:"time",label:"完整單行",format:"YYYY.MM.DD wk HH:mm:ss A",size:"small",customSize:30}];
+ renderList();renderClock();
+}
+$("#resetBtn").onclick=()=>location.reload();
+$("#exportBtn").onclick=exportClock;
+
+function exportClock(){
+ const settings={
+   w:+$("#canvasW").value,h:+$("#canvasH").value,bgMode:$("#bgMode").value,bgColor:$("#bgColor").value,
+   imageData,videoData,fit:$("#mediaFit").value,color:$("#textColor").value,
+   mainSize:+$("#mainSize").value,smallSize:+$("#smallSize").value,font:$("#fontFamily").value,
+   weight:$("#fontWeight").value,alignX:$("#alignX").value,alignY:$("#alignY").value,
+   x:+$("#offsetX").value,y:+$("#offsetY").value,blocks
+ };
+ const out=`<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OBS Clock</title><style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
+#clock{position:relative;width:${settings.w}px;height:${settings.h}px;overflow:hidden;background:${settings.bgMode==="color"?settings.bgColor:"transparent"}}
+.media{position:absolute;inset:0;width:100%;height:100%;object-fit:${settings.fit}}
+#content{position:absolute;inset:0;display:flex;justify-content:${settings.alignX};align-items:${settings.alignY};padding:20px;transform:translate(${settings.x}px,${settings.y}px)}
+#stack{width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;font-family:${settings.font};font-weight:${settings.weight}}
+.row{display:flex;justify-content:center;align-items:baseline;white-space:nowrap}
+.text{color:${settings.color};font-size:${settings.mainSize}px;line-height:1.05;text-shadow:0 2px 5px rgba(0,0,0,.5)}
+.line{height:0;border-top-style:dashed;color:${settings.color}}
+</style></head><body>
+<div id="clock">
+${settings.bgMode==="image"&&settings.imageData?`<img class="media" src="${settings.imageData}">`:""}
+${settings.bgMode==="video"&&settings.videoData?`<video class="media" src="${settings.videoData}" autoplay muted loop playsinline></video>`:""}
+<div id="content"><div id="stack"></div></div></div>
+<script>
+const S=${JSON.stringify(settings)};
+const pad=n=>String(n).padStart(2,"0");
+function wk(d,m){const z=["日","一","二","三","四","五","六"],e=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];return m==="zh"?"星期"+z[d.getDay()]:e[d.getDay()]}
+function fmt(f,d){let H=d.getHours(),h=H%12||12;const m={YYYY:d.getFullYear(),YY:String(d.getFullYear()).slice(-2),MM:pad(d.getMonth()+1),M:d.getMonth()+1,DD:pad(d.getDate()),D:d.getDate(),HH:pad(H),H:H,hh:pad(h),h:h,mm:pad(d.getMinutes()),m:d.getMinutes(),ss:pad(d.getSeconds()),s:d.getSeconds(),A:H<12?"AM":"PM",a:H<12?"am":"pm",ddd:wk(d,"en"),wk:wk(d,"zh")};return f.replace(/YYYY|YY|MM|DD|HH|hh|ddd|wk|M|D|H|h|mm|m|ss|s|A|a/g,k=>m[k])}
+function draw(){const n=new Date(),st=document.getElementById("stack");st.innerHTML="";S.blocks.forEach(b=>{if(b.type==="dash"){let e=document.createElement("div");e.className="line";e.style.width=(b.width||58)+"%";e.style.borderTopWidth=(b.thickness||3)+"px";st.appendChild(e);return}let r=document.createElement("div");r.className="row";let t=document.createElement("span");t.className="text";t.style.fontSize=(b.customSize||(b.size==="small"?S.smallSize:S.mainSize))+"px";t.style.color=b.color||S.color;t.textContent=["time","date","weekday"].includes(b.type)?fmt(b.format||"",n):(b.text||"");r.appendChild(t);st.appendChild(r)})}
+draw();setInterval(draw,250);
+<\/script></body></html>`;
+ const blob=new Blob([out],{type:"text/html;charset=utf-8"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+ const d=new Date(),stamp=d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+"_"+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds());
+ a.download="OBS時鐘_"+stamp+".html";a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+renderList();renderClock();setInterval(renderClock,250);
+</script>
+</body>
+</html>
