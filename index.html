@@ -79,6 +79,7 @@ label{display:block;margin-top:9px;font-size:13px}hr{border:0;border-top:1px sol
 <label>背景尺寸</label><select id="bgSize"><option value="cover">填滿 cover</option><option value="contain">完整 contain</option><option value="auto">原始 auto</option></select>
 <label>背景重複</label><select id="bgRepeat"><option value="no-repeat">不重複</option><option value="repeat">重複</option><option value="repeat-x">橫向重複</option><option value="repeat-y">縱向重複</option></select>
 <label>背景位置</label><select id="bgPosition"><option value="center">置中</option><option value="top center">上中</option><option value="bottom center">下中</option><option value="left center">左中</option><option value="right center">右中</option></select>
+<button onclick="importZip()">匯入 ZIP</button>
 <button onclick="exportZip()">匯出 ZIP</button>
 <p class="hint">圖片上傳後會一起放進 ZIP 的 assets 資料夾。</p>
 </aside>
@@ -220,6 +221,10 @@ function applyStyle(key,value){if(!selected)return;if(key==='col'){selected.styl
 function formatTimeBlock(b,now=new Date()){const d=b.dataset||b;const ds=d.timeDateSeparator??'/',ts=d.timeTimeSeparator??':',join=d.timeJoin??' ';const date=[];if(d.timeYear==='1')date.push(String(now.getFullYear()));if(d.timeMonth==='1')date.push(String(now.getMonth()+1).padStart(2,'0'));if(d.timeDate==='1')date.push(String(now.getDate()).padStart(2,'0'));const parts=[];if(date.length)parts.push(date.join(ds));if(d.timeWeekday==='1')parts.push(['星期日','星期一','星期二','星期三','星期四','星期五','星期六'][now.getDay()]);const time=[];let h=now.getHours();const use12=d.timeHour12==='1';if(d.timeAmPm==='1')time.push(h<12?'AM':'PM');if(use12){h=h%12||12}if(d.timeHour==='1')time.push(String(h).padStart(2,'0'));if(d.timeMinute==='1')time.push(String(now.getMinutes()).padStart(2,'0'));if(d.timeSecond==='1')time.push(String(now.getSeconds()).padStart(2,'0'));if(time.length){let timeText='';const hasPeriod=d.timeAmPm==='1';if(hasPeriod){timeText=time[0]+(time.length>1?' ':'')+time.slice(1).join(ts)}else timeText=time.join(ts);parts.push(timeText)}return parts.join(join)}
 setInterval(()=>document.querySelectorAll('.block[data-type="time"]').forEach(renderBlock),1000);
 function toggleStyle(p,on,off){selected.style[p]=selected.style[p]===on?off:on}function toggleUnderline(){selected.style.textDecoration=selected.style.textDecoration==='underline'?'none':'underline'}function toggleHighlight(){selected.style.backgroundImage=selected.style.backgroundImage?'':'linear-gradient(transparent 55%, #fff176 55%)'}function deleteBlock(){selected.remove();selected=null;settings.innerHTML='請先點選區塊';refreshAll()}function rgba(hex,a){const h=hex.replace('#','');const r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);return`rgba(${r},${g},${b},${a})`}function justify(v){return v||'center'}function align(v){return v||'center'}function safeAssetName(n){return Date.now()+'-'+n.replace(/[^a-zA-Z0-9._-]/g,'_')}function typeName(t){return{header:'頁首區塊',nav:'導航區塊',footer:'頁尾區塊',text:'文字區塊',blank:'空白區塊',image:'圖片區塊',video:'影片區塊',embed:'自訂嵌入區塊',social:'社群區塊',carousel:'圖片輪播區塊',table:'表格區塊',marquee:'跑馬燈區塊',tip:'提示區塊',time:'時間區塊'}[t]}function clamp(v,min,max){return Math.min(max,Math.max(min,Number(v)||min))}function getSpan(v,d){const m=String(v).match(/span\s+(\d+)/);return m?m[1]:d}function esc(s){return String(s||'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}function rgbToHex(rgb){if(!rgb)return'#111111';if(rgb.startsWith('#'))return rgb;const m=rgb.match(/\d+/g);if(!m)return'#111111';return'#'+m.slice(0,3).map(x=>(+x).toString(16).padStart(2,'0')).join('')}
+
+async function importZip(){
+ alert('ZIP 匯入功能將於 V4 完整版完成。');
+}
 </script>
 </body>
 </html>
