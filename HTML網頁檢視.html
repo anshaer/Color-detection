@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZIP 網站檢視器</title>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<style>
+:root{
+  --bg:#111827;
+  --panel:#1f2937;
+  --panel2:#0f172a;
+  --line:#374151;
+  --text:#f9fafb;
+  --muted:#9ca3af;
+  --accent:#60a5fa;
+  --danger:#f87171;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font-family:Arial,"Microsoft JhengHei",sans-serif;background:var(--bg);color:var(--text)}
+body{display:flex;flex-direction:column}
+.topbar{display:flex;gap:10px;align-items:center;padding:10px;background:var(--panel);border-bottom:1px solid var(--line)}
+.btn,.file-btn{
+  border:0;border-radius:8px;padding:10px 14px;background:#334155;color:white;cursor:pointer;font-size:14px
+}
+.btn:hover,.file-btn:hover{background:#475569}
+.file-btn input{display:none}
+.home-btn{font-size:18px;padding:8px 12px}
+.address-wrap{flex:1;display:flex;align-items:center;background:white;border-radius:8px;overflow:hidden}
+.protocol{padding-left:12px;color:#64748b;font-size:14px;white-space:nowrap}
+#address{
+  flex:1;border:0;outline:0;padding:11px 12px;font-size:15px;color:#111827;background:white
+}
+.main{flex:1;min-height:0;display:flex}
+.sidebar{
+  width:280px;max-width:38vw;background:var(--panel2);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0
+}
+.sidebar-head{padding:12px;border-bottom:1px solid var(--line)}
+#fileSearch{width:100%;padding:9px;border:1px solid var(--line);border-radius:7px;background:#111827;color:white}
+#fileList{overflow:auto;padding:8px}
+.file-item{
+  padding:9px 10px;border-radius:6px;cursor:pointer;color:#dbeafe;font-size:14px;
+  word-break:break-all
+}
+.file-item:hover{background:#1e3a5f}
+.file-item.active{background:#2563eb;color:white}
+.viewer{flex:1;min-width:0;min-height:0;background:white;position:relative}
+#frame{width:100%;height:100%;border:0;background:white}
+#message{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+  padding:30px;color:#475569;background:white;font-size:18px;line-height:1.7
+}
+.status{padding:7px 12px;background:#020617;border-top:1px solid var(--line);color:var(--muted);font-size:12px}
+.hidden{display:none!important}
+@media(max-width:700px){
+  .topbar{flex-wrap:wrap}
+  .address-wrap{order:3;width:100%;flex-basis:100%}
+  .sidebar{width:150px;max-width:42vw}
+  .file-item{font-size:12px;padding:8px 6px}
+}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <label class="file-btn">上傳 ZIP
+    <input id="zipInput" type="file" accept=".zip,application/zip">
+  </label>
+  <button id="homeBtn" class="btn home-btn" title="回首頁">⌂</button>
+  <button id="backBtn" class="btn" title="上一頁">←</button>
+  <button id="reloadBtn" class="btn" title="重新整理">↻</button>
+  <div class="address-wrap">
+    <span class="protocol">https://</span>
+    <input id="address" value="www.測試.測試/index" spellcheck="false">
+  </div>
+</div>
+
+<div class="main">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <input id="fileSearch" placeholder="搜尋 ZIP 內檔案">
+    </div>
+    <div id="fileList"></div>
+  </aside>
+  <main class="viewer">
+    <iframe id="frame" sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-downloads"></iframe>
+    <div id="message">
+      請先上傳 ZIP。<br>
+      系統會優先尋找 index、index.html、index.htm、index.md。
+    </div>
+  </main>
+</div>
+
+<div id="status" class="status">尚未載入 ZIP</div>
+
+<script>
+(() => {
+  const zipInput = document.getElementById('zipInput');
+  const address = document.getElementById('address');
+  const frame = document.getElementById('frame');
+  const message = document.getElementById('message');
+  const fileList = document.getElementById('fileList');
+  const fileSearch = document.getElementById('fileSearch');
+  const status = document.getElementById('status');
+
+  const VIRTUAL_HOST = 'www.測試.測試';
+  const textExts = new Set(['txt','json','js','css','xml','csv','log','ini','conf','yaml','yml','svg']);
+  const htmlExts = new Set(['html','htm']);
+  const imageExts = new Set(['jpg','jpeg','png','gif','webp','bmp','svg','ico','avif']);
+  const mediaExts = new Set(['mp4','webm','ogg','mp3','wav','m4a']);
+  const fontExts = new Set(['woff','woff2','ttf','otf']);
+
+  let zip = null;
+  let files = new Map();
+  let objectUrls = new Map();
+  let currentPath = '';
+  let history = [];
+  let historyIndex = -1;
+
+  const normalize = path => {
+    path = decodeURIComponent(String(path || '')).replace(/\\/g,'/');
+    path = path.replace(/^https?:\/\/[^/]+/i,'');
+    path = path.split('#')[0].split('?')[0];
+    path = path.replace(/^\/+/,'');
+    const parts = [];
+    for (const p of path.split('/')) {
+      if (!p || p === '.') continue;
+      if (p === '..') parts.pop(); else parts.push(p);
+    }
+    return parts.join('/');
+  };
+
+  const dirname = path => {
+    const i = path.lastIndexOf('/');
+    return i >= 0 ? path.slice(0,i+1) : '';
+  };
+
+  const ext = path => {
+    const name = path.split('/').pop() || '';
+    const i = name.lastIndexOf('.');
+    return i >= 0 ? name.slice(i+1).toLowerCase() : '';
+  };
+
+  const basename = path => path.split('/').pop() || path;
+
+  function virtualUrl(path) {
+    return `${VIRTUAL_HOST}/${path || 'index'}`;
+  }
+
+  function setStatus(text) {
+    status.textContent = text;
+  }
+
+  function clearObjectUrls() {
+    for (const url of objectUrls.values()) URL.revokeObjectURL(url);
+    objectUrls.clear();
+  }
+
+  async function makeObjectUrl(path) {
+    path = normalize(path);
+    if (objectUrls.has(path)) return objectUrls.get(path);
+    const entry = files.get(path);
+    if (!entry) return null;
+    const blob = await entry.async('blob');
+    const url = URL.createObjectURL(blob);
+    objectUrls.set(path, url);
+    return url;
+  }
+
+  function findCaseInsensitive(path) {
+    path = normalize(path);
+    if (files.has(path)) return path;
+    const lower = path.toLowerCase();
+    for (const key of files.keys()) {
+      if (key.toLowerCase() === lower) return key;
+    }
+    return null;
+  }
+
+  function resolveCandidate(input) {
+    let path = normalize(input);
+    if (!path || path.toLowerCase() === 'index') return findHome();
+
+    let found = findCaseInsensitive(path);
+    if (found) return found;
+
+    const last = basename(path);
+    if (!last.includes('.')) {
+      for (const suffix of ['.html','.htm','.md','.txt']) {
+        found = findCaseInsensitive(path + suffix);
+        if (found) return found;
+      }
+      for (const idx of ['index.html','index.htm','index.md','index.txt','index']) {
+        found = findCaseInsensitive(path.replace(/\/?$/,'/') + idx);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  function findHome() {
+    const priorities = ['index.html','index.htm','index.md','index.txt','index'];
+    for (const p of priorities) {
+      const found = findCaseInsensitive(p);
+      if (found) return found;
+    }
+
+    // ZIP 外層若只有一個專案資料夾，找該資料夾內的 index
+    const roots = new Set([...files.keys()].map(p => p.split('/')[0]));
+    if (roots.size === 1) {
+      const root = [...roots][0];
+      for (const p of priorities) {
+        const found = findCaseInsensitive(`${root}/${p}`);
+        if (found) return found;
+      }
+    }
+
+    return [...files.keys()].sort()[0] || null;
+  }
+
+  async function makeCssObjectUrl(path) {
+    path = normalize(path);
+    const cacheKey = '__css__' + path;
+    if (objectUrls.has(cacheKey)) return objectUrls.get(cacheKey);
+    const entry = files.get(path);
+    if (!entry) return null;
+    const css = await entry.async('text');
+    const rewritten = await rewriteCssUrls(css, dirname(path));
+    const url = URL.createObjectURL(new Blob([rewritten], {type:'text/css;charset=utf-8'}));
+    objectUrls.set(cacheKey, url);
+    return url;
+  }
+
+  async function rewriteHtml(html, pagePath) {
+    const baseDir = dirname(pagePath);
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    const resolveLocal = raw => {
+      if (!raw) return null;
+      raw = String(raw).trim();
+      if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(raw)) return null;
+      if (/^https?:\/\//i.test(raw)) {
+        try {
+          const u = new URL(raw);
+          if (u.hostname !== VIRTUAL_HOST) return null;
+          raw = u.pathname;
+        } catch { return null; }
+      }
+      return normalize(raw.startsWith('/') ? raw : baseDir + raw);
+    };
+
+    const assetSelectors = [
+      ['img','src'],['script','src'],['link','href'],['source','src'],
+      ['audio','src'],['video','src'],['video','poster'],['track','src'],
+      ['embed','src'],['object','data'],['input','src'],['iframe','src']
+    ];
+
+    for (const [selector, attr] of assetSelectors) {
+      const nodes = [...doc.querySelectorAll(`${selector}[${attr}]`)];
+      for (const node of nodes) {
+        const raw = node.getAttribute(attr);
+        const local = resolveLocal(raw);
+        if (!local) continue;
+        const found = findCaseInsensitive(local);
+        if (!found) continue;
+
+        let url;
+        if (
+          selector === 'link' &&
+          attr === 'href' &&
+          (node.getAttribute('rel') || '').toLowerCase().includes('stylesheet')
+        ) {
+          url = await makeCssObjectUrl(found);
+        } else {
+          url = await makeObjectUrl(found);
+        }
+        if (url) node.setAttribute(attr, url);
+      }
+    }
+
+    // picture/source 或響應式圖片
+    for (const node of [...doc.querySelectorAll('[srcset]')]) {
+      const parts = node.getAttribute('srcset').split(',');
+      const rewritten = [];
+      for (const part of parts) {
+        const bits = part.trim().split(/\s+/);
+        const raw = bits.shift();
+        const local = resolveLocal(raw);
+        const found = local ? findCaseInsensitive(local) : null;
+        if (found) {
+          const url = await makeObjectUrl(found);
+          rewritten.push([url, ...bits].join(' '));
+        } else {
+          rewritten.push(part.trim());
+        }
+      }
+      node.setAttribute('srcset', rewritten.join(', '));
+    }
+
+    // CSS url(...) 內嵌資源
+    for (const styleNode of [...doc.querySelectorAll('style')]) {
+      styleNode.textContent = await rewriteCssUrls(styleNode.textContent, baseDir);
+    }
+    for (const node of [...doc.querySelectorAll('[style]')]) {
+      node.setAttribute('style', await rewriteCssUrls(node.getAttribute('style'), baseDir));
+    }
+
+    // 建立 ZIP 路徑對應表，供頁面內 JavaScript 動態換圖時使用
+    const assetMap = {};
+    for (const filePath of files.keys()) {
+      const url = ext(filePath) === 'css'
+        ? await makeCssObjectUrl(filePath)
+        : await makeObjectUrl(filePath);
+      if (!url) continue;
+      assetMap[filePath] = url;
+      assetMap['/' + filePath] = url;
+      assetMap[filePath.toLowerCase()] = url;
+      assetMap[('/' + filePath).toLowerCase()] = url;
+    }
+
+    // 攔截超連結，交由父頁面模擬導航
+    for (const a of [...doc.querySelectorAll('a[href]')]) {
+      const raw = a.getAttribute('href');
+      const local = resolveLocal(raw);
+      if (!local) continue;
+      const hash = raw.includes('#') ? '#' + raw.split('#').slice(1).join('#') : '';
+      a.setAttribute('href', '#');
+      a.setAttribute('data-zip-path', local + hash);
+    }
+
+    const bridge = doc.createElement('script');
+    bridge.textContent = `
+      (() => {
+        const ZIP_BASE = ${JSON.stringify(baseDir)};
+        const ZIP_MAP = ${JSON.stringify(assetMap)};
+
+        function normalizeZipPath(value) {
+          if (!value) return null;
+          let raw = String(value).trim();
+          if (/^(data:|blob:|javascript:|mailto:|tel:|#)/i.test(raw)) return null;
+
+          try {
+            if (/^https?:\\/\\//i.test(raw)) {
+              const u = new URL(raw);
+              raw = u.pathname;
+            }
+          } catch {}
+
+          raw = raw.split('#')[0].split('?')[0];
+          try { raw = decodeURIComponent(raw); } catch {}
+          raw = raw.replace(/\\\\/g, '/');
+
+          const joined = raw.startsWith('/') ? raw.slice(1) : ZIP_BASE + raw;
+          const out = [];
+          for (const part of joined.split('/')) {
+            if (!part || part === '.') continue;
+            if (part === '..') out.pop();
+            else out.push(part);
+          }
+          return out.join('/');
+        }
+
+        function zipUrl(value) {
+          const path = normalizeZipPath(value);
+          if (!path) return null;
+          return ZIP_MAP[path] || ZIP_MAP['/' + path] ||
+                 ZIP_MAP[path.toLowerCase()] || ZIP_MAP[('/' + path).toLowerCase()] || null;
+        }
+
+        function rewriteSrcset(value) {
+          if (!value) return value;
+          return String(value).split(',').map(part => {
+            const bits = part.trim().split(/\\s+/);
+            const raw = bits.shift();
+            const mapped = zipUrl(raw);
+            return [mapped || raw, ...bits].join(' ');
+          }).join(', ');
+        }
+
+        function rewriteElement(el) {
+          if (!el || el.nodeType !== 1) return;
+          const attrs = ['src','href','poster','data'];
+          for (const attr of attrs) {
+            if (!el.hasAttribute(attr)) continue;
+            const raw = el.getAttribute(attr);
+            const mapped = zipUrl(raw);
+            if (mapped && raw !== mapped) el.setAttribute(attr, mapped);
+          }
+
+          if (el.hasAttribute('srcset')) {
+            const raw = el.getAttribute('srcset');
+            const mapped = rewriteSrcset(raw);
+            if (mapped !== raw) el.setAttribute('srcset', mapped);
+          }
+
+          if (el.hasAttribute('style')) {
+            const raw = el.getAttribute('style');
+            const mapped = raw.replace(/url\\((['"]?)(.*?)\\1\\)/gi, (all, q, value) => {
+              return 'url("' + (zipUrl(value) || value) + '")';
+            });
+            if (mapped !== raw) el.setAttribute('style', mapped);
+          }
+        }
+
+        function scan(root) {
+          if (!root) return;
+          if (root.nodeType === 1) rewriteElement(root);
+          root.querySelectorAll?.('[src],[href],[poster],[data],[srcset],[style]').forEach(rewriteElement);
+        }
+
+        const observer = new MutationObserver(records => {
+          for (const record of records) {
+            if (record.type === 'attributes') rewriteElement(record.target);
+            for (const node of record.addedNodes) scan(node);
+          }
+        });
+
+        observer.observe(document.documentElement, {
+          subtree:true,
+          childList:true,
+          attributes:true,
+          attributeFilter:['src','href','poster','data','srcset','style']
+        });
+
+        document.addEventListener('DOMContentLoaded', () => scan(document));
+
+        document.addEventListener('click', function(e) {
+          const a = e.target.closest('a[data-zip-path]');
+          if (!a) return;
+          e.preventDefault();
+          parent.postMessage({type:'zipNavigate', path:a.dataset.zipPath}, '*');
+        });
+
+        document.addEventListener('submit', function(e) {
+          const form = e.target;
+          const action = form.getAttribute('action');
+          if (!action || /^(https?:|mailto:|javascript:)/i.test(action)) return;
+          e.preventDefault();
+          parent.postMessage({type:'zipNavigate', path:action}, '*');
+        });
+
+        scan(document);
+      })();
+    `;
+    (doc.head || doc.documentElement).prepend(bridge);
+
+    return '<!DOCTYPE html>\n' + doc.documentElement.outerHTML;
+  }
+
+  async function rewriteCssUrls(css, baseDir) {
+    const matches = [...css.matchAll(/url\((['"]?)(.*?)\1\)/gi)];
+    let result = css;
+    for (const m of matches) {
+      const raw = m[2].trim();
+      if (/^(data:|blob:|https?:|#)/i.test(raw)) continue;
+      const path = normalize(raw.startsWith('/') ? raw : baseDir + raw);
+      const found = findCaseInsensitive(path);
+      if (!found) continue;
+      const url = await makeObjectUrl(found);
+      result = result.replace(m[0], `url("${url}")`);
+    }
+    return result;
+  }
+
+  function wrapContent(title, body) {
+    return `<!DOCTYPE html><html lang="zh-Hant"><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>${escapeHtml(title)}</title>
+    <style>
+      body{font-family:Arial,"Microsoft JhengHei",sans-serif;max-width:1100px;margin:0 auto;padding:28px;line-height:1.7;color:#1f2937}
+      img,video{max-width:100%;height:auto}
+      pre{background:#f3f4f6;padding:14px;overflow:auto;border-radius:8px}
+      code{font-family:Consolas,monospace}
+      table{border-collapse:collapse;max-width:100%}
+      th,td{border:1px solid #d1d5db;padding:8px}
+      a{color:#2563eb}
+    </style></head><body>${body}</body></html>`;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    })[c]);
+  }
+
+  async function render(path, pushHistory = true) {
+    const found = resolveCandidate(path);
+    if (!found) {
+      message.classList.remove('hidden');
+      message.innerHTML = `找不到檔案：<br><strong>${escapeHtml(normalize(path) || 'index')}</strong>`;
+      setStatus('找不到指定檔案');
+      return;
+    }
+
+    currentPath = found;
+    address.value = virtualUrl(found);
+    message.classList.add('hidden');
+
+    if (pushHistory) {
+      history = history.slice(0, historyIndex + 1);
+      history.push(found);
+      historyIndex = history.length - 1;
+    }
+
+    document.querySelectorAll('.file-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.path === found);
+    });
+
+    const type = ext(found);
+    const entry = files.get(found);
+
+    try {
+      if (htmlExts.has(type)) {
+        const text = await entry.async('text');
+        frame.srcdoc = await rewriteHtml(text, found);
+      } else if (type === 'md' || type === 'markdown') {
+        const text = await entry.async('text');
+        const body = marked.parse(text, {gfm:true, breaks:true});
+        frame.srcdoc = await rewriteHtml(wrapContent(basename(found), body), found);
+      } else if (imageExts.has(type)) {
+        const url = await makeObjectUrl(found);
+        frame.srcdoc = wrapContent(basename(found),
+          `<h2>${escapeHtml(basename(found))}</h2><img src="${url}" alt="">`);
+      } else if (mediaExts.has(type)) {
+        const url = await makeObjectUrl(found);
+        const tag = ['mp3','wav','m4a','ogg'].includes(type) ? 'audio' : 'video';
+        frame.srcdoc = wrapContent(basename(found),
+          `<h2>${escapeHtml(basename(found))}</h2><${tag} src="${url}" controls autoplay style="width:100%"></${tag}>`);
+      } else if (type === 'pdf') {
+        const url = await makeObjectUrl(found);
+        frame.removeAttribute('srcdoc');
+        frame.src = url;
+      } else if (textExts.has(type) || !type) {
+        const text = await entry.async('text');
+        frame.srcdoc = wrapContent(basename(found), `<h2>${escapeHtml(basename(found))}</h2><pre>${escapeHtml(text)}</pre>`);
+      } else if (fontExts.has(type)) {
+        frame.srcdoc = wrapContent(basename(found), `<h2>${escapeHtml(basename(found))}</h2><p>這是字型檔，無法直接預覽。</p>`);
+      } else {
+        const url = await makeObjectUrl(found);
+        frame.srcdoc = wrapContent(basename(found),
+          `<h2>${escapeHtml(basename(found))}</h2>
+           <p>瀏覽器無法直接預覽此檔案格式。</p>
+           <p><a href="${url}" download="${escapeHtml(basename(found))}">下載此檔案</a></p>`);
+      }
+      setStatus(`目前檔案：${found}`);
+    } catch (err) {
+      message.classList.remove('hidden');
+      message.innerHTML = `讀取失敗：<br>${escapeHtml(err.message || String(err))}`;
+      setStatus('檔案讀取失敗');
+    }
+  }
+
+  function buildFileList(filter = '') {
+    fileList.innerHTML = '';
+    const q = filter.trim().toLowerCase();
+    const paths = [...files.keys()].filter(p => !q || p.toLowerCase().includes(q)).sort();
+    for (const path of paths) {
+      const div = document.createElement('div');
+      div.className = 'file-item';
+      div.dataset.path = path;
+      div.textContent = path;
+      div.title = path;
+      div.addEventListener('click', () => render(path));
+      fileList.appendChild(div);
+    }
+  }
+
+  zipInput.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    clearObjectUrls();
+    files.clear();
+    history = [];
+    historyIndex = -1;
+    currentPath = '';
+    frame.removeAttribute('src');
+    frame.srcdoc = '';
+    message.classList.remove('hidden');
+    message.textContent = '正在讀取 ZIP…';
+    setStatus(`正在讀取：${file.name}`);
+
+    try {
+      zip = await JSZip.loadAsync(file);
+      for (const [path, entry] of Object.entries(zip.files)) {
+        if (!entry.dir && !path.startsWith('__MACOSX/') && !basename(path).startsWith('.')) {
+          files.set(normalize(path), entry);
+        }
+      }
+      buildFileList();
+      const home = findHome();
+      if (!home) throw new Error('ZIP 內沒有可讀取的檔案');
+      setStatus(`已載入 ${files.size} 個檔案`);
+      await render(home);
+    } catch (err) {
+      message.classList.remove('hidden');
+      message.innerHTML = `ZIP 讀取失敗：<br>${escapeHtml(err.message || String(err))}`;
+      setStatus('ZIP 讀取失敗');
+    }
+  });
+
+  address.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      render(address.value);
+    }
+  });
+
+  document.getElementById('homeBtn').addEventListener('click', () => {
+    const home = findHome();
+    if (home) render(home);
+  });
+
+  document.getElementById('reloadBtn').addEventListener('click', () => {
+    if (currentPath) render(currentPath, false);
+  });
+
+  document.getElementById('backBtn').addEventListener('click', () => {
+    if (historyIndex > 0) {
+      historyIndex--;
+      render(history[historyIndex], false);
+    }
+  });
+
+  fileSearch.addEventListener('input', () => buildFileList(fileSearch.value));
+
+  window.addEventListener('message', e => {
+    if (!e.data || e.data.type !== 'zipNavigate') return;
+    const raw = String(e.data.path || '');
+    const hashIndex = raw.indexOf('#');
+    const path = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
+    const hash = hashIndex >= 0 ? raw.slice(hashIndex) : '';
+    const target = resolveCandidate(path);
+    if (target) {
+      render(target).then(() => {
+        if (hash) {
+          setTimeout(() => {
+            try {
+              frame.contentWindow.location.hash = hash;
+            } catch {}
+          }, 80);
+        }
+      });
+    }
+  });
+})();
+</script>
+</body>
+</html>
